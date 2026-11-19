@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAK QR Clinic Soft — Patient Voice Appointment</title>
+  <link rel="manifest" href="/manifest.json" />
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root { --primary:#0d9488; --dark:#0f172a; --card:#ffffff; --bg:#f1f5f9; --text:#1e293b; --muted:#64748b; }
+    * { box-sizing:border-box; margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; }
+    body { background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:40px; }
+    header { background:linear-gradient(135deg,#0f172a,#0d9488); color:#fff; padding:18px 16px; text-align:center; }
+    header h1 { font-size:20px; letter-spacing:0.3px; }
+    header p { font-size:12px; opacity:0.85; margin-top:4px; }
+    .container { max-width:540px; margin:16px auto; padding:0 14px; }
+    .tabs { display:flex; gap:8px; margin-bottom:14px; }
+    .tab-btn { flex:1; padding:11px; border:none; border-radius:10px; background:#e2e8f0; color:#334155; font-weight:600; cursor:pointer; font-size:13px; }
+    .tab-btn.active { background:var(--primary); color:#fff; }
+    .card { background:var(--card); border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,0.06); margin-bottom:14px; }
+    .bot-box { text-align:center; padding:10px 0; }
+    .mic-btn { width:84px; height:84px; border-radius:50%; border:none; background:var(--primary); color:#fff; font-size:32px; cursor:pointer; box-shadow:0 6px 20px rgba(13,148,136,0.35); transition:transform .2s; }
+    .mic-btn.listening { background:#dc2626; animation:pulse 1.2s infinite; }
+    @keyframes pulse { 0%{transform:scale(1)} 50%{transform:scale(1.08)} 100%{transform:scale(1)} }
+    .status-pill { display:inline-block; margin-top:10px; padding:4px 12px; border-radius:99px; background:#f0fdfa; color:#0f766e; font-size:12px; font-weight:600; }
+    .chat-log { max-height:240px; overflow-y:auto; margin:14px 0; display:flex; flex-direction:column; gap:8px; }
+    .msg { padding:10px 12px; border-radius:12px; font-size:14px; line-height:1.5; max-width:88%; }
+    .msg.bot { background:#f0fdfa; border:1px solid #ccfbf1; align-self:flex-start; direction:rtl; text-align:right; }
+    .msg.user { background:#0f172a; color:#fff; align-self:flex-end; }
+    .input-row { display:flex; gap:8px; }
+    input, select { width:100%; padding:11px 12px; border:1px solid #cbd5e1; border-radius:10px; font-size:14px; margin-bottom:10px; }
+    .btn { width:100%; padding:12px; border:none; border-radius:10px; background:var(--primary); color:#fff; font-weight:700; font-size:14px; cursor:pointer; }
+    .btn-dark { background:#0f172a; }
+    .slot-grid { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 14px; }
+    .slot-chip { padding:8px 12px; border-radius:8px; border:1px solid #0d9488; background:#fff; color:#0d9488; font-size:13px; font-weight:600; cursor:pointer; }
+    .slot-chip.selected { background:#0d9488; color:#fff; }
+    .slot-chip.booked { background:#f1f5f9; border-color:#cbd5e1; color:#94a3b8; text-decoration:line-through; cursor:not-allowed; }
+    .slip { border:2px dashed #0d9488; border-radius:14px; padding:18px; text-align:center; background:#f8fafc; }
+    .pin-badge { font-size:26px; font-weight:800; color:#0d9488; letter-spacing:3px; margin:8px 0; }
+    #slipQr { display:flex; justify-content:center; margin:12px 0; }
+    .hidden { display:none; }
+    .rx-box { text-align:left; background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-top:12px; font-size:13px; }
+    label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="clinicTitle">TAK QR Clinic Soft</h1>
+    <p>24/7 Smart Appointment &amp; Pakistani Urdu Voice Receptionist</p>
+  </header>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('voice')">Voice Receptionist</button>
+      <button class="tab-btn" onclick="switchTab('manual')">Quick Booking</button>
+      <button class="tab-btn" onclick="switchTab('lookup')">Check Slip / Rx</button>
+    </div>
+
+    <!-- VOICE BOT TAB -->
+    <div id="tab-voice" class="card">
+      <div class="bot-box">
+        <button id="micBtn" class="mic-btn" onclick="toggleVoice()">🎙️</button>
+        <div><span id="voiceStatus" class="status-pill">Tap Mic &amp; Speak in Urdu</span></div>
+      </div>
+      <div id="chatLog" class="chat-log"></div>
+      <div class="input-row">
+        <input id="chatInput" placeholder="Type message or use mic..." style="margin-bottom:0" />
+        <button class="btn" style="width:auto;padding:0 18px" onclick="sendChat()">Send</button>
+      </div>
+    </div>
+
+    <!-- QUICK MANUAL BOOKING TAB -->
+    <div id="tab-manual" class="card hidden">
+      <label>Select Doctor</label>
+      <select id="docSelect" onchange="renderSlots()"></select>
+      <div id="docInfo" style="font-size:13px;color:#0f766e;margin-bottom:8px;font-weight:600"></div>
+      <label>Available Time Slots</label>
+      <div id="slotGrid" class="slot-grid"></div>
+      <label>Patient Full Name</label>
+      <input id="pName" placeholder="e.g. Muhammad Ali" />
+      <label>WhatsApp / Mobile Number</label>
+      <input id="pPhone" placeholder="e.g. 03001234567" type="tel" />
+      <button class="btn" onclick="bookManually()">Confirm Appointment</button>
+    </div>
+
+    <!-- SLIP & PRESCRIPTION LOOKUP TAB -->
+    <div id="tab-lookup" class="card hidden">
+      <label>Enter Your 6-Digit Appointment PIN</label>
+      <input id="lookupPin" placeholder="e.g. 482910" />
+      <button class="btn btn-dark" onclick="lookupAppointment()">Search Slip &amp; Prescription</button>
+      <div id="lookupResult" style="margin-top:14px"></div>
+    </div>
+
+    <!-- CONFIRMED APPOINTMENT SLIP -->
+    <div id="slipCard" class="card hidden">
+      <div class="slip">
+        <h3 style="color:#0f172a">Appointment Confirmed</h3>
+        <div class="pin-badge" id="slipPin">------</div>
+        <div id="slipQr"></div>
+        <div id="slipDetails" style="font-size:14px;line-height:1.7;margin-top:8px"></div>
+        <div id="waStatusMsg" style="font-size:12px;color:#0d9488;margin-top:8px;font-weight:600"></div>
+        <button class="btn btn-dark" style="margin-top:12px" onclick="window.print()">Print / Save Slip</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="ttsAudio" style="display:none"></audio>
+
+  <script>
+    // Load Firebase Config saved via URL/LocalStorage or default
+    const DEFAULT_CFG = JSON.parse(localStorage.getItem('tak_clinic_cfg') || '{}');
+    let db = null;
+    let doctors = [];
+    let appointments = [];
+    let settings = { clinicName: 'TAK QR Clinic Soft', voice: 'ur-PK-UzmaNeural', backendUrl: window.location.origin, geminiApiKey: '' };
+    let chatHistory = [];
+    let selectedSlot = '';
+
+    function initFirebase() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('fbUrl')) {
+        DEFAULT_CFG.databaseURL = params.get('fbUrl');
+        DEFAULT_CFG.apiKey = params.get('fbKey') || 'demo';
+        DEFAULT_CFG.projectId = params.get('fbProj') || 'tak-clinic';
+        localStorage.setItem('tak_clinic_cfg', JSON.stringify(DEFAULT_CFG));
+      }
+      if (!DEFAULT_CFG.databaseURL) {
+        addMsg('bot', 'ایڈمن پینل میں جا کر اپنا Firebase Database URL سیٹ کریں۔');
+        return;
+      }
+      firebase.initializeApp(DEFAULT_CFG);
+      db = firebase.database();
+
+      db.ref('settings').on('value', (snap) => {
+        if (snap.val()) {
+          settings = { ...settings, ...snap.val() };
+          document.getElementById('clinicTitle').textContent = settings.clinicName || 'TAK QR Clinic Soft';
+        }
+      });
+
+      db.ref('doctors').on('value', (snap) => {
+        const val = snap.val() || {};
+        doctors = Object.keys(val).map((id) => ({ id, ...val[id] }));
+        populateDoctors();
+      });
+
+      db.ref('appointments').on('value', (snap) => {
+        const val = snap.val() || {};
+        appointments = Object.keys(val).map((id) => ({ id, ...val[id] }));
+        renderSlots();
+      });
+
+      setTimeout(() => {
+        const welcome = `السلام علیکم! ${settings.clinicName} میں خوش آمدید۔ آپ کس ڈاکٹر سے اپائنٹمنٹ لینا چاہتے ہیں؟`;
+        addMsg('bot', welcome);
+        speakUrdu(welcome);
+      }, 800);
+    }
+
+    function switchTab(tab) {
+      ['voice', 'manual', 'lookup'].forEach((t) => {
+        document.getElementById('tab-' + t).classList.toggle('hidden', t !== tab);
+      });
+      document.querySelectorAll('.tab-btn').forEach((b, i) => {
+        b.classList.toggle('active', ['voice', 'manual', 'lookup'][i] === tab);
+      });
+    }
+
+    function addMsg(role, text) {
+      const log = document.getElementById('chatLog');
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.textContent = text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    // Exact Pakistani Urdu TTS via Render Backend (Microsoft Edge TTS)
+    async function speakUrdu(text) {
+      try {
+        const base = settings.backendUrl || window.location.origin;
+        const res = await fetch(`${base}/api/tts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice: settings.voice || 'ur-PK-UzmaNeural' })
+        });
+        if (!res.ok) throw new Error('TTS unavailable');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = document.getElementById('ttsAudio');
+        audio.src = url;
+        audio.play().catch(() => {});
+      } catch (e) {
+        if ('speechSynthesis' in window) {
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = 'ur-PK';
+          speechSynthesis.speak(u);
+        }
+      }
+    }
+
+    // Real-time Urdu Speech Recognition
+    let recognition = null;
+    function toggleVoice() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) return alert('Voice recognition not supported in this browser. Please use Chrome.');
+      if (recognition) { recognition.stop(); recognition = null; return; }
+
+      recognition = new SpeechRec();
+      recognition.lang = 'ur-PK';
+      recognition.interimResults = false;
+      document.getElementById('micBtn').classList.add('listening');
+      document.getElementById('voiceStatus').textContent = 'Listening (Urdu)...';
+
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        document.getElementById('chatInput').value = transcript;
+        sendChat();
+      };
+      recognition.onend = () => {
+        document.getElementById('micBtn').classList.remove('listening');
+        document.getElementById('voiceStatus').textContent = 'Tap Mic & Speak in Urdu';
+        recognition = null;
+      };
+      recognition.start();
+    }
+
+    async function sendChat() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      addMsg('user', text);
+      chatHistory.push({ role: 'user', text });
+
+      const base = settings.backendUrl || window.location.origin;
+      try {
+        const res = await fetch(`${base}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            history: chatHistory,
+            doctors,
+            bookedSlots: appointments,
+            geminiApiKey: settings.geminiApiKey || '',
+            clinicName: settings.clinicName
+          })
+        });
+        const data = await res.json();
+        const reply = data.reply || 'معذرت، دوبارہ کوشش کریں۔';
+        addMsg('bot', reply);
+        chatHistory.push({ role: 'bot', text: reply });
+        speakUrdu(reply);
+
+        if (data.booking && data.booking.doctorId && data.booking.patientName && data.booking.patientPhone) {
+          await finalizeBooking(data.booking.doctorId, data.booking.slot, data.booking.patientName, data.booking.patientPhone);
+        }
+      } catch (e) {
+        addMsg('bot', 'سرور سے رابطہ نہیں ہو سکا۔ براہ کرم Quick Booking استعمال کریں۔');
+      }
+    }
+
+    function populateDoctors() {
+      const sel = document.getElementById('docSelect');
+      sel.innerHTML = doctors.map((d) => `<option value="${d.id}">${d.name} (${d.specialty || 'General'})</option>`).join('');
+      renderSlots();
+    }
+
+    function renderSlots() {
+      const docId = document.getElementById('docSelect').value;
+      const doc = doctors.find((d) => d.id === docId);
+      const grid = document.getElementById('slotGrid');
+      const info = document.getElementById('docInfo');
+      if (!doc) { grid.innerHTML = ''; info.textContent = ''; return; }
+
+      info.textContent = `Days: ${doc.days || 'Mon-Sat'} | Consultation Fee: Rs. ${doc.fee || 0}`;
+      const taken = appointments.filter((a) => a.doctorId === doc.id && a.status !== 'cancelled').map((a) => a.slot);
+      grid.innerHTML = (doc.slots || []).map((s) => {
+        const isTaken = taken.includes(s);
+        return `<button type="button" class="slot-chip ${isTaken ? 'booked' : ''} ${selectedSlot === s ? 'selected' : ''}" ${isTaken ? 'disabled' : ''} onclick="selectSlot('${s}')">${s}</button>`;
+      }).join('');
+    }
+
+    function selectSlot(s) { selectedSlot = s; renderSlots(); }
+
+    async function bookManually() {
+      const docId = document.getElementById('docSelect').value;
+      const name = document.getElementById('pName').value.trim();
+      const phone = document.getElementById('pPhone').value.trim();
+      if (!docId || !selectedSlot || !name || !phone) return alert('Please select doctor, time slot, and enter name & phone.');
+      await finalizeBooking(docId, selectedSlot, name, phone);
+    }
+
+    async function finalizeBooking(doctorId, slot, patientName, patientPhone) {
+      const doc = doctors.find((d) => d.id === doctorId);
+      if (!doc || !db) return;
+      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const record = {
+        pin,
+        doctorId: doc.id,
+        doctorName: doc.name,
+        days: doc.days || 'Today',
+        slot,
+        fee: doc.fee || '0',
+        patientName,
+        patientPhone,
+        status: 'confirmed',
+        prescription: null,
+        createdAt: new Date().toISOString()
+      };
+      await db.ref('appointments/' + pin).set(record);
+
+      // Show Slip + QR
+      document.getElementById('slipCard').classList.remove('hidden');
+      document.getElementById('slipPin').textContent = 'PIN: ' + pin;
+      document.getElementById('slipDetails').innerHTML = `
+        <strong>Patient:</strong> ${patientName}<br>
+        <strong>Doctor:</strong> ${doc.name}<br>
+        <strong>Day &amp; Time:</strong> ${record.days} — ${slot}<br>
+        <strong>Fee:</strong> Rs. ${record.fee}
+      `;
+      const qrEl = document.getElementById('slipQr');
+      qrEl.innerHTML = '';
+      new QRCode(qrEl, { text: `TAK-CLINIC|PIN:${pin}|${patientName}|${doc.name}|${slot}`, width: 140, height: 140 });
+
+      // Trigger Auto WhatsApp via 4-Number Rotation Backend
+      const waText = `*${settings.clinicName} — Appointment Confirmed*\n\n` +
+        `PIN: *${pin}*\nPatient: ${patientName}\nDoctor: ${doc.name}\nDay: ${record.days}\nTime: ${slot}\nFees: Rs. ${record.fee}\n\nPlease show this message or QR at the clinic.`;
+      const base = settings.backendUrl || window.location.origin;
+      try {
+        const waRes = await fetch(`${base}/api/wa/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: patientPhone, message: waText })
+        });
+        const waData = await waRes.json();
+        document.getElementById('waStatusMsg').textContent = waData.sent
+          ? `WhatsApp Confirmation Sent Automatically (Line: ${waData.usedSlot.toUpperCase()})`
+          : 'Slip saved! (WhatsApp line offline — please screenshot slip)';
+      } catch (_) {
+        document.getElementById('waStatusMsg').textContent = 'Slip confirmed! Please screenshot this QR slip.';
+      }
+    }
+
+    async function lookupAppointment() {
+      const pin = document.getElementById('lookupPin').value.trim();
+      if (!pin || !db) return;
+      const snap = await db.ref('appointments/' + pin).once('value');
+      const a = snap.val();
+      const box = document.getElementById('lookupResult');
+      if (!a) { box.innerHTML = '<p style="color:#dc2626">No appointment found for this PIN.</p>'; return; }
+      let rxHtml = '<p style="color:#64748b;margin-top:8px">Prescription not added yet.</p>';
+      if (a.prescription) {
+        rxHtml = `<div class="rx-box">
+          <strong>Doctor's Prescription</strong><br>
+          <p style="margin-top:6px;white-space:pre-line">${a.prescription.medicines || ''}</p>
+          <p style="margin-top:6px;color:#0f766e"><strong>Notes:</strong> ${a.prescription.notes || '-'}</p>
+          <p style="font-size:11px;color:#64748b;margin-top:4px">Updated: ${new Date(a.prescription.updatedAt).toLocaleString()}</p>
+        </div>`;
+      }
+      box.innerHTML = `<div class="slip">
+        <strong>${a.patientName}</strong> (PIN: ${a.pin})<br>
+        ${a.doctorName} | ${a.days} ${a.slot} | Rs. ${a.fee}<br>
+        Status: <strong>${a.status.toUpperCase()}</strong>
+        ${rxHtml}
+      </div>`;
+    }
+
+    initFirebase();
+  </script>
+</body>
+</html>

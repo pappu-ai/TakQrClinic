@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAK QR Clinic Soft — Admin Panel</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root { --primary:#0d9488; --dark:#0f172a; --bg:#f1f5f9; --card:#fff; }
+    * { box-sizing:border-box; margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; }
+    body { background:var(--bg); color:#1e293b; padding-bottom:40px; }
+    header { background:var(--dark); color:#fff; padding:16px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+    header h1 { font-size:18px; }
+    .nav { display:flex; gap:6px; overflow-x:auto; padding:12px 14px; background:#fff; border-bottom:1px solid #e2e8f0; }
+    .nav button { padding:9px 14px; border:none; border-radius:8px; background:#f1f5f9; color:#334155; font-weight:600; font-size:13px; cursor:pointer; white-space:nowrap; }
+    .nav button.active { background:var(--primary); color:#fff; }
+    .wrap { max-width:960px; margin:16px auto; padding:0 14px; }
+    .card { background:var(--card); border-radius:12px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,0.05); margin-bottom:16px; }
+    h2 { font-size:16px; margin-bottom:12px; color:#0f172a; }
+    label { display:block; font-size:12px; font-weight:600; color:#64748b; margin-bottom:4px; }
+    input, select, textarea { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; margin-bottom:10px; }
+    .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+    .btn { padding:10px 16px; border:none; border-radius:8px; background:var(--primary); color:#fff; font-weight:600; cursor:pointer; font-size:13px; }
+    .btn-red { background:#dc2626; }
+    .btn-dark { background:#0f172a; }
+    .wa-card { border:1px solid #e2e8f0; border-radius:10px; padding:14px; text-align:center; background:#f8fafc; }
+    .badge { display:inline-block; padding:3px 10px; border-radius:99px; font-size:11px; font-weight:700; margin:6px 0; }
+    .badge.connected { background:#dcfce7; color:#166534; }
+    .badge.disconnected { background:#fee2e2; color:#991b1b; }
+    .badge.qr { background:#fef9c3; color:#854d0e; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid #e2e8f0; }
+    th { background:#f8fafc; color:#475569; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TAK QR Clinic Soft — Admin Panel</h1>
+    <span style="font-size:12px;opacity:0.8">English Admin Dashboard</span>
+  </header>
+
+  <div class="nav">
+    <button class="active" onclick="showTab('doctors', this)">Doctors &amp; PDF Schedule</button>
+    <button onclick="showTab('whatsapp', this)">4 WhatsApp Lines</button>
+    <button onclick="showTab('appointments', this)">Appointments &amp; Rx</button>
+    <button onclick="showTab('qr', this)">Clinic Entry QR</button>
+    <button onclick="showTab('settings', this)">Firebase &amp; Voice Setup</button>
+  </div>
+
+  <div class="wrap">
+    <!-- TAB 1: DOCTORS & PDF UPLOAD -->
+    <div id="tab-doctors">
+      <div class="card">
+        <h2>Upload Doctor Schedule (PDF)</h2>
+        <p style="font-size:12px;color:#64748b;margin-bottom:10px">Upload your clinic PDF schedule. The system extracts doctors, days, slots, and fees directly into Firebase.</p>
+        <input type="file" id="pdfFile" accept=".pdf" />
+        <button class="btn btn-dark" onclick="uploadPdf()">Extract &amp; Save from PDF</button>
+        <div id="pdfStatus" style="font-size:13px;margin-top:8px;color:#0d9488"></div>
+      </div>
+
+      <div class="card">
+        <h2>Add Doctor Manually</h2>
+        <div class="grid2">
+          <div><label>Doctor Name</label><input id="dName" placeholder="Dr. Ahmed Khan" /></div>
+          <div><label>Specialty</label><input id="dSpec" placeholder="General Physician" /></div>
+          <div><label>Available Days</label><input id="dDays" placeholder="Mon, Wed, Fri" /></div>
+          <div><label>Consultation Fee (Rs.)</label><input id="dFee" placeholder="500" type="number" /></div>
+          <div><label>Time Slots (comma separated)</label><input id="dSlots" placeholder="10:00 AM, 10:30 AM, 11:00 AM" /></div>
+          <div><label>Doctor App Login PIN (4 digits)</label><input id="dPin" placeholder="1234" /></div>
+        </div>
+        <button class="btn" onclick="addDoctor()">Save Doctor to Firebase</button>
+      </div>
+
+      <div class="card">
+        <h2>Active Doctors List</h2>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>Doctor</th><th>Days &amp; Slots</th><th>Fee</th><th>App PIN</th><th>Action</th></tr></thead>
+            <tbody id="docTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: 4 WHATSAPP ROTATION -->
+    <div id="tab-whatsapp" class="hidden">
+      <div class="card">
+        <h2>4 WhatsApp Business Numbers (Auto Round-Robin Rotation)</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:14px">Connect up to 4 WhatsApp Business numbers. Every new appointment automatically rotates: Line 1 → Line 2 → Line 3 → Line 4 to prevent bans.</p>
+        <button class="btn btn-dark" style="margin-bottom:14px" onclick="refreshWA()">Refresh Status</button>
+        <div class="grid2" id="waGrid"></div>
+      </div>
+    </div>
+
+    <!-- TAB 3: APPOINTMENTS & PRESCRIPTIONS -->
+    <div id="tab-appointments" class="hidden">
+      <div class="card">
+        <h2>Live Appointments &amp; Doctor Prescriptions</h2>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>PIN</th><th>Patient &amp; Phone</th><th>Doctor &amp; Slot</th><th>Status</th><th>Prescription</th></tr></thead>
+            <tbody id="apptTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: CLINIC QR CODE -->
+    <div id="tab-qr" class="hidden">
+      <div class="card" style="text-align:center">
+        <h2>Clinic Reception QR Code</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">Print and display this QR code at your clinic. Patients scan it to open the 24/7 Urdu Voice Bot directly.</p>
+        <div id="clinicQrBox" style="display:flex;justify-content:center;margin:16px 0"></div>
+        <p id="clinicQrUrl" style="font-size:12px;color:#0f766e;word-break:break-all;margin-bottom:12px"></p>
+        <button class="btn btn-dark" onclick="window.print()">Print QR Poster</button>
+      </div>
+    </div>
+
+    <!-- TAB 5: SETTINGS -->
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <h2>Firebase &amp; Voice Configuration</h2>
+        <label>Firebase Realtime Database URL</label>
+        <input id="cfgFbUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" />
+        <label>Firebase API Key</label>
+        <input id="cfgFbKey" placeholder="AIzaSy..." />
+        <label>Firebase Project ID</label>
+        <input id="cfgFbProj" placeholder="your-project-id" />
+        <label>Clinic Display Name</label>
+        <input id="cfgClinicName" value="TAK QR Clinic Soft" />
+        <label>Render Backend Server URL</label>
+        <input id="cfgBackend" placeholder="https://tak-clinic.onrender.com" />
+        <label>Pakistani Urdu Voice (Free Edge TTS)</label>
+        <select id="cfgVoice">
+          <option value="ur-PK-UzmaNeural">Uzma — Pakistani Female (Natural Urdu)</option>
+          <option value="ur-PK-AsadNeural">Asad — Pakistani Male (Natural Urdu)</option>
+        </select>
+        <label>Gemini Free API Key (For Smart Urdu Conversation &amp; PDF Reading)</label>
+        <input id="cfgGemini" placeholder="AIzaSy... (Free from aistudio.google.com)" />
+        <button class="btn" onclick="saveSettings()">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let db = null;
+    let cfg = JSON.parse(localStorage.getItem('tak_clinic_cfg') || '{}');
+
+    function showTab(name, btn) {
+      ['doctors', 'whatsapp', 'appointments', 'qr', 'settings'].forEach((t) => {
+        document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+      });
+      document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      if (name === 'whatsapp') refreshWA();
+      if (name === 'qr') renderClinicQr();
+    }
+
+    function loadSettingsUI() {
+      document.getElementById('cfgFbUrl').value = cfg.databaseURL || '';
+      document.getElementById('cfgFbKey').value = cfg.apiKey || '';
+      document.getElementById('cfgFbProj').value = cfg.projectId || '';
+      document.getElementById('cfgBackend').value = cfg.backendUrl || window.location.origin;
+      document.getElementById('cfgClinicName').value = cfg.clinicName || 'TAK QR Clinic Soft';
+      document.getElementById('cfgVoice').value = cfg.voice || 'ur-PK-UzmaNeural';
+      document.getElementById('cfgGemini').value = cfg.geminiApiKey || '';
+    }
+
+    function initFirebase() {
+      loadSettingsUI();
+      if (!cfg.databaseURL) return;
+      if (!firebase.apps.length) firebase.initializeApp(cfg);
+      db = firebase.database();
+
+      db.ref('doctors').on('value', (snap) => {
+        const val = snap.val() || {};
+        const rows = Object.keys(val).map((id) => {
+          const d = val[id];
+          return `<tr>
+            <td><strong>${d.name}</strong><br><small>${d.specialty || ''}</small></td>
+            <td>${d.days}<br><small>${(d.slots || []).join(', ')}</small></td>
+            <td>Rs. ${d.fee}</td>
+            <td><strong>${d.pin}</strong></td>
+            <td><button class="btn btn-red" style="padding:5px 10px" onclick="delDoc('${id}')">Delete</button></td>
+          </tr>`;
+        }).join('');
+        document.getElementById('docTable').innerHTML = rows || '<tr><td colspan="5">No doctors added yet.</td></tr>';
+      });
+
+      db.ref('appointments').on('value', (snap) => {
+        const val = snap.val() || {};
+        const list = Object.values(val).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        document.getElementById('apptTable').innerHTML = list.map((a) => `<tr>
+          <td><strong>${a.pin}</strong></td>
+          <td>${a.patientName}<br><small>${a.patientPhone}</small></td>
+          <td>${a.doctorName}<br><small>${a.days} — ${a.slot}</small></td>
+          <td>${a.status}</td>
+          <td>${a.prescription ? `<small>${a.prescription.medicines}</small>` : '<small style="color:#94a3b8">Pending</small>'}</td>
+        </tr>`).join('') || '<tr><td colspan="5">No appointments yet.</td></tr>';
+      });
+    }
+
+    async function saveSettings() {
+      cfg = {
+        databaseURL: document.getElementById('cfgFbUrl').value.trim(),
+        apiKey: document.getElementById('cfgFbKey').value.trim() || 'demo',
+        projectId: document.getElementById('cfgFbProj').value.trim() || 'tak-clinic',
+        backendUrl: document.getElementById('cfgBackend').value.trim() || window.location.origin,
+        clinicName: document.getElementById('cfgClinicName').value.trim() || 'TAK QR Clinic Soft',
+        voice: document.getElementById('cfgVoice').value,
+        geminiApiKey: document.getElementById('cfgGemini').value.trim()
+      };
+      localStorage.setItem('tak_clinic_cfg', JSON.stringify(cfg));
+      if (!firebase.apps.length && cfg.databaseURL) firebase.initializeApp(cfg);
+      if (cfg.databaseURL) {
+        db = firebase.database();
+        await db.ref('settings').set({
+          clinicName: cfg.clinicName,
+          backendUrl: cfg.backendUrl,
+          voice: cfg.voice,
+          geminiApiKey: cfg.geminiApiKey
+        });
+      }
+      alert('Settings saved to Firebase & Local Storage!');
+      location.reload();
+    }
+
+    async function addDoctor() {
+      if (!db) return alert('First configure Firebase in Settings tab.');
+      const name = document.getElementById('dName').value.trim();
+      const slots = document.getElementById('dSlots').value.split(',').map((s) => s.trim()).filter(Boolean);
+      if (!name || !slots.length) return alert('Doctor Name and at least 1 time slot required.');
+      await db.ref('doctors').push({
+        name,
+        specialty: document.getElementById('dSpec').value.trim() || 'General',
+        days: document.getElementById('dDays').value.trim() || 'Mon - Sat',
+        fee: document.getElementById('dFee').value.trim() || '0',
+        slots,
+        pin: document.getElementById('dPin').value.trim() || String(Math.floor(1000 + Math.random() * 9000))
+      });
+      ['dName', 'dSpec', 'dDays', 'dFee', 'dSlots', 'dPin'].forEach((id) => document.getElementById(id).value = '');
+      alert('Doctor added successfully!');
+    }
+
+    function delDoc(id) { if (db && confirm('Delete this doctor?')) db.ref('doctors/' + id).remove(); }
+
+    async function uploadPdf() {
+      if (!db) return alert('First configure Firebase in Settings tab.');
+      const file = document.getElementById('pdfFile').files[0];
+      if (!file) return alert('Select a PDF file first.');
+      const st = document.getElementById('pdfStatus');
+      st.textContent = 'Reading PDF schedule...';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('geminiApiKey', cfg.geminiApiKey || '');
+      const base = cfg.backendUrl || window.location.origin;
+      const res = await fetch(`${base}/api/parse-pdf`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.doctors && data.doctors.length) {
+        for (const d of data.doctors) await db.ref('doctors').push(d);
+        st.textContent = `Success! ${data.doctors.length} doctor(s) imported into Firebase.`;
+      } else {
+        st.textContent = 'Could not detect doctors automatically. Add manually or check Gemini API key.';
+      }
+    }
+
+    async function refreshWA() {
+      const base = cfg.backendUrl || window.location.origin;
+      try {
+        const res = await fetch(`${base}/api/wa/status`);
+        const data = await res.json();
+        const grid = document.getElementById('waGrid');
+        grid.innerHTML = ['wa1', 'wa2', 'wa3', 'wa4'].map((slot, i) => {
+          const s = data.slots[slot];
+          return `<div class="wa-card">
+            <h3>WhatsApp Line #${i + 1}</h3>
+            <span class="badge ${s.status}">${s.status.toUpperCase()}</span>
+            <div style="font-size:12px;color:#475569;margin-bottom:8px">${s.phone ? 'Phone: +' + s.phone : 'Not linked'} | Sent: ${s.sentCount}</div>
+            ${s.qrDataUrl ? `<img src="${s.qrDataUrl}" style="width:170px;height:170px;margin:8px auto;display:block;border-radius:8px" />` : ''}
+            <div style="display:flex;gap:6px;justify-content:center;margin-top:8px">
+              <button class="btn" onclick="connectWA('${slot}')">Connect / QR</button>
+              <button class="btn btn-red" onclick="disconnectWA('${slot}')">Reset</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        document.getElementById('waGrid').innerHTML = '<p style="color:#dc2626">Backend server unreachable. Check Render URL in Settings.</p>';
+      }
+    }
+
+    async function connectWA(slot) {
+      const base = cfg.backendUrl || window.location.origin;
+      await fetch(`${base}/api/wa/connect/${slot}`, { method: 'POST' });
+      setTimeout(refreshWA, 2500);
+    }
+
+    async function disconnectWA(slot) {
+      const base = cfg.backendUrl || window.location.origin;
+      await fetch(`${base}/api/wa/disconnect/${slot}`, { method: 'POST' });
+      setTimeout(refreshWA, 1000);
+    }
+
+    function renderClinicQr() {
+      const base = cfg.backendUrl || window.location.origin;
+      const url = `${base}/index.html?fbUrl=${encodeURIComponent(cfg.databaseURL || '')}&fbKey=${encodeURIComponent(cfg.apiKey || '')}&fbProj=${encodeURIComponent(cfg.projectId || '')}`;
+      document.getElementById('clinicQrUrl').textContent = url;
+      const box = document.getElementById('clinicQrBox');
+      box.innerHTML = '';
+      new QRCode(box, { text: url, width: 220, height: 220 });
+    }
+
+    initFirebase();
+  </script>
+</body>
+</html>

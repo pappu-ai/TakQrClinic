@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAK QR Clinic Soft — Doctor Portal</title>
+  <link rel="manifest" href="/manifest.json" />
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <style>
+    :root { --primary:#0d9488; --dark:#0f172a; --bg:#f1f5f9; }
+    * { box-sizing:border-box; margin:0; padding:0; font-family:system-ui,-apple-system,sans-serif; }
+    body { background:var(--bg); color:#1e293b; padding-bottom:40px; }
+    header { background:var(--dark); color:#fff; padding:16px; display:flex; justify-content:space-between; align-items:center; }
+    header h1 { font-size:17px; }
+    .wrap { max-width:600px; margin:16px auto; padding:0 14px; }
+    .card { background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.06); margin-bottom:14px; }
+    label { display:block; font-size:12px; font-weight:600; color:#64748b; margin-bottom:4px; }
+    input, textarea { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; margin-bottom:10px; }
+    .btn { width:100%; padding:11px; border:none; border-radius:8px; background:var(--primary); color:#fff; font-weight:700; cursor:pointer; font-size:14px; }
+    .btn-sm { width:auto; padding:7px 12px; font-size:12px; }
+    .patient-row { border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:10px; background:#f8fafc; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TAK QR Clinic Soft — Doctor App</h1>
+    <button id="logoutBtn" class="btn btn-sm hidden" style="background:#dc2626" onclick="logout()">Logout</button>
+  </header>
+
+  <div class="wrap">
+    <!-- LOGIN CARD -->
+    <div id="loginCard" class="card">
+      <h2 style="font-size:16px;margin-bottom:12px">Doctor Login</h2>
+      <label>Firebase Database URL (One-time setup)</label>
+      <input id="fbUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" />
+      <label>Your Doctor PIN (from Admin Panel)</label>
+      <input id="docPin" placeholder="e.g. 1234" type="password" />
+      <button class="btn" onclick="loginDoctor()">Open My Schedule</button>
+    </div>
+
+    <!-- DOCTOR DASHBOARD -->
+    <div id="dashCard" class="hidden">
+      <div class="card">
+        <h2 id="docWelcome" style="font-size:17px;color:#0f172a">Welcome</h2>
+        <p id="docMeta" style="font-size:13px;color:#0d9488;margin-top:4px"></p>
+      </div>
+
+      <div class="card">
+        <h3 style="font-size:15px;margin-bottom:12px">My Patients Queue</h3>
+        <div id="patientList">Loading...</div>
+      </div>
+    </div>
+
+    <!-- PRESCRIPTION MODAL CARD -->
+    <div id="rxCard" class="card hidden">
+      <h3 style="font-size:15px;margin-bottom:8px">Write Prescription</h3>
+      <p id="rxPatientInfo" style="font-size:13px;color:#0d9488;margin-bottom:10px;font-weight:600"></p>
+      <label>Medicines &amp; Dosage</label>
+      <textarea id="rxMeds" rows="5" placeholder="1. Tab Panadol 500mg — 1+1+1 (3 days)&#10;2. Cap Risek 20mg — 1 before breakfast"></textarea>
+      <label>Doctor Notes / Follow-up Advice</label>
+      <input id="rxNotes" placeholder="Drink plenty of water. Follow up after 5 days." />
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="savePrescription()">Send &amp; Save Prescription</button>
+        <button class="btn" style="background:#64748b" onclick="closeRx()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let db = null;
+    let currentDoctor = null;
+    let activePin = null;
+    let activePatientPhone = null;
+    let activePatientName = null;
+    let settings = {};
+
+    const savedCfg = JSON.parse(localStorage.getItem('tak_clinic_cfg') || '{}');
+    if (savedCfg.databaseURL) document.getElementById('fbUrl').value = savedCfg.databaseURL;
+
+    async function loginDoctor() {
+      const url = document.getElementById('fbUrl').value.trim();
+      const pin = document.getElementById('docPin').value.trim();
+      if (!url || !pin) return alert('Enter Firebase URL and your Doctor PIN.');
+
+      savedCfg.databaseURL = url;
+      localStorage.setItem('tak_clinic_cfg', JSON.stringify(savedCfg));
+      if (!firebase.apps.length) firebase.initializeApp({ databaseURL: url });
+      db = firebase.database();
+
+      const snap = await db.ref('doctors').once('value');
+      const docs = snap.val() || {};
+      const foundId = Object.keys(docs).find((id) => String(docs[id].pin) === pin);
+      if (!foundId) return alert('Invalid Doctor PIN. Please check with Admin.');
+
+      currentDoctor = { id: foundId, ...docs[foundId] };
+      document.getElementById('loginCard').classList.add('hidden');
+      document.getElementById('dashCard').classList.remove('hidden');
+      document.getElementById('logoutBtn').classList.remove('hidden');
+      document.getElementById('docWelcome').textContent = currentDoctor.name;
+      document.getElementById('docMeta').textContent = `${currentDoctor.specialty || ''} | ${currentDoctor.days} | Fee: Rs. ${currentDoctor.fee}`;
+
+      db.ref('settings').on('value', (s) => { settings = s.val() || {}; });
+
+      // Fetch ONLY this doctor's appointments from Firebase
+      db.ref('appointments').orderByChild('doctorId').equalTo(currentDoctor.id).on('value', (s) => {
+        const val = s.val() || {};
+        const list = Object.values(val).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        const container = document.getElementById('patientList');
+        if (!list.length) { container.innerHTML = '<p style="color:#64748b;font-size:13px">No patients booked yet.</p>'; return; }
+        container.innerHTML = list.map((a) => `
+          <div class="patient-row">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong>${a.patientName}</strong>
+              <span style="font-size:12px;color:#0d9488;font-weight:700">${a.slot}</span>
+            </div>
+            <div style="font-size:12px;color:#64748b;margin:4px 0">PIN: ${a.pin} | Phone: ${a.patientPhone} | Status: <strong>${a.status}</strong></div>
+            ${a.prescription ? `<div style="font-size:12px;background:#ecfdf5;padding:6px 8px;border-radius:6px;margin:6px 0">Rx Sent: ${a.prescription.medicines}</div>` : ''}
+            <button class="btn btn-sm" onclick="openRx('${a.pin}','${a.patientName.replace(/'/g, '')}','${a.patientPhone}')">
+              ${a.prescription ? 'Update Prescription' : 'Write Prescription'}
+            </button>
+          </div>
+        `).join('');
+      });
+    }
+
+    function openRx(pin, name, phone) {
+      activePin = pin;
+      activePatientName = name;
+      activePatientPhone = phone;
+      document.getElementById('rxPatientInfo').textContent = `Patient: ${name} (PIN: ${pin})`;
+      document.getElementById('rxCard').classList.remove('hidden');
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
+
+    function closeRx() {
+      document.getElementById('rxCard').classList.add('hidden');
+      document.getElementById('rxMeds').value = '';
+      document.getElementById('rxNotes').value = '';
+    }
+
+    async function savePrescription() {
+      const meds = document.getElementById('rxMeds').value.trim();
+      const notes = document.getElementById('rxNotes').value.trim();
+      if (!meds) return alert('Please write medicines before sending.');
+
+      await db.ref('appointments/' + activePin).update({
+        status: 'checked',
+        prescription: {
+          medicines: meds,
+          notes,
+          doctorName: currentDoctor.name,
+          updatedAt: new Date().toISOString()
+        }
+      });
+
+      // Optionally auto-send prescription on WhatsApp via 4-number rotation backend
+      if (settings.backendUrl && activePatientPhone) {
+        const msg = `*${settings.clinicName || 'TAK QR Clinic Soft'} — Digital Prescription*\n\n` +
+          `Patient: ${activePatientName}\nDoctor: ${currentDoctor.name}\n\n*Medicines:*\n${meds}\n\n*Notes:* ${notes || '-'}`;
+        fetch(`${settings.backendUrl}/api/wa/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: activePatientPhone, message: msg })
+        }).catch(() => {});
+      }
+
+      alert('Prescription saved to Firebase & Admin Panel!');
+      closeRx();
+    }
+
+    function logout() { location.reload(); }
+  </script>
+</body>
+</html>
